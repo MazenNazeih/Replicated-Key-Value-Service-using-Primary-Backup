@@ -3,17 +3,16 @@ package sysmonitor
 import "net/rpc"
 import "fmt"
 
-
 type Client struct {
-  me string      // client's name 
-  server string  // the server of the monitor service 
+	me     string // client's name
+	server string // the server of the monitor service
 }
 
 func MakeClient(me string, server string) *Client {
-  ck := new(Client)
-  ck.me = me
-  ck.server = server
-  return ck
+	ck := new(Client)
+	ck.me = me
+	ck.server = server
+	return ck
 }
 
 //
@@ -33,52 +32,52 @@ func MakeClient(me string, server string) *Client {
 // please don't change this function.
 //
 func call(srv string, rpcname string,
-          args interface{}, reply interface{}) bool {
-  c, errx := rpc.Dial("unix", srv)
-  if errx != nil {
-    return false
-  }
-  defer c.Close()
-    
-  err := c.Call(rpcname, args, reply)
-  if err == nil {
-    return true
-  }
+	args interface{}, reply interface{}) bool {
+	c, errx := rpc.Dial("unix", srv)
+	if errx != nil {
+		return false
+	}
+	defer c.Close()
 
-  fmt.Println(err)
-  return false
+	err := c.Call(rpcname, args, reply)
+	if err == nil {
+		return true
+	}
+
+	fmt.Println(err)
+	return false
 }
 
 func (ck *Client) Ping(viewnum uint) (View, error) {
-  // prepare the arguments.
-  args := &PingArgs{}
-  args.Me = ck.me
-  args.Viewnum = viewnum
-  var reply PingReply
+	// prepare the arguments.
+	args := &PingArgs{}
+	args.Me = ck.me
+	args.Viewnum = viewnum
+	var reply PingReply
 
-  // send an RPC request, wait for the reply.
-  ok := call(ck.server, "MonitorServer.Ping", args, &reply)
-  if ok == false {
-    return View{}, fmt.Errorf("Ping(%v) failed", viewnum)
-  }
+	// send an RPC request, wait for the reply.
+	ok := call(ck.server, "MonitorServer.Ping", args, &reply)
+	if ok == false {
+		return View{}, fmt.Errorf("Ping(%v) failed", viewnum)
+	}
 
-  return reply.View, nil
+	return reply.View, nil
 }
 
 func (ck *Client) Get() (View, bool) {
-  args := &GetArgs{}
-  var reply GetReply
-  ok := call(ck.server, "MonitorServer.Get", args, &reply)
-  if ok == false {
-    return View{}, false
-  }
-  return reply.View, true
+	args := &GetArgs{}
+	var reply GetReply
+	ok := call(ck.server, "MonitorServer.Get", args, &reply)
+	if ok == false {
+		return View{}, false
+	}
+	return reply.View, true
 }
 
 func (ck *Client) Primary() string {
-  v, ok := ck.Get()
-  if ok {
-    return v.Primary
-  }
-  return ""
+	v, ok := ck.Get()
+	if ok {
+		return v.Primary
+	}
+	return ""
 }
