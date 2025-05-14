@@ -9,7 +9,7 @@ import (
 	"os"
 	"runtime"
 	"strconv"
-	"sysmonitor"
+	"replicatedkv/sysmonitor"
 	"testing"
 	"time"
 )
