@@ -136,21 +136,21 @@ func (server *KVServer) Put(args *PutArgs, reply *PutReply) error {
 	new_value_str := strconv.Itoa(int(new_value_int))
 	// Forward to backup if there is one
 	if server.view.Backup != "" {
-			var backupReply PutReply
-			backupArgs := &ForwardPutArgs{
-				Args:     args,
-				OldValue: previous_value,
-			}
-			if args.DoHash {
-				backupArgs.Args.Value = new_value_str
-			}
-			ok := call(server.view.Backup, "KVServer.ForwardPut", backupArgs, &backupReply)
-			
-			if !ok{
-				return errors.New("failed to forward to backup")
-			}
-		} 
-	
+		var backupReply PutReply
+		backupArgs := &ForwardPutArgs{
+			Args:     args,
+			OldValue: previous_value,
+		}
+		if args.DoHash {
+			backupArgs.Args.Value = new_value_str
+		}
+		ok := call(server.view.Backup, "KVServer.ForwardPut", backupArgs, &backupReply)
+
+		if !ok {
+			return errors.New("failed to forward to backup")
+		}
+	}
+
 	// if no error during forwarding then update the database
 	if args.DoHash {
 
@@ -208,7 +208,7 @@ func (server *KVServer) Get(args *GetArgs, reply *GetReply) error {
 
 // ping the view server periodically.
 func (server *KVServer) tick() {
-server.mu.Lock()
+	server.mu.Lock()
 	defer server.mu.Unlock()
 	// This line will give an error initially as view and err are not used.
 	view, err := server.monitorClnt.Ping(server.view.Viewnum)
@@ -218,8 +218,6 @@ server.mu.Lock()
 	for err != nil {
 		view, err = server.monitorClnt.Ping(server.view.Viewnum)
 	}
-
-	
 
 	if view.Primary == server.id {
 		server.isprimary = true
@@ -260,7 +258,6 @@ server.mu.Lock()
 	server.view = view
 }
 
-
 // tell the server to shut itself down.
 // please do not change this function.
 func (server *KVServer) Kill() {
@@ -296,9 +293,9 @@ func StartKVServer(monitorServer string, id string) *KVServer {
 	// or do anything to subvert it.
 
 	go func() {
-		for server.dead == false {
+		for !server.dead {
 			conn, err := server.l.Accept()
-			if err == nil && server.dead == false {
+			if err == nil && !server.dead {
 				if server.unreliable && (rand.Int63()%1000) < 100 {
 					// discard the request.
 					conn.Close()
@@ -325,7 +322,7 @@ func StartKVServer(monitorServer string, id string) *KVServer {
 			} else if err == nil {
 				conn.Close()
 			}
-			if err != nil && server.dead == false {
+			if err != nil && !server.dead {
 				fmt.Printf("KVServer(%v) accept: %v\n", id, err.Error())
 				server.Kill()
 			}
@@ -339,7 +336,7 @@ func StartKVServer(monitorServer string, id string) *KVServer {
 
 	server.done.Add(1)
 	go func() {
-		for server.dead == false {
+		for !server.dead {
 			server.tick()
 			time.Sleep(sysmonitor.PingInterval)
 		}
