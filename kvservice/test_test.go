@@ -7,9 +7,9 @@ import (
 	"math/rand"
 	"net"
 	"os"
+	"replicatedkv/sysmonitor"
 	"runtime"
 	"strconv"
-	"replicatedkv/sysmonitor"
 	"testing"
 	"time"
 )

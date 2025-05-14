@@ -8,10 +8,10 @@ import (
 	"net"
 	"net/rpc"
 	"os"
+	"replicatedkv/sysmonitor"
 	"strconv"
 	"sync"
 	"syscall"
-	"replicatedkv/sysmonitor"
 	"time"
 )
 
@@ -41,18 +41,20 @@ type KVServer struct {
 	// currentSequenceNumber int
 	PutOps map[string]PutReply
 	GetOps map[string]GetReply
-
+	mu     sync.Mutex
 	// Add your declarations here.
 }
 
 // RPC for the primary to forward a Put/PutHash to the backup
 func (server *KVServer) ForwardPut(args *ForwardPutArgs, reply *PutReply) error {
+	server.mu.Lock()
+	defer server.mu.Unlock()
 
-	if server.dead == true {
-		return errors.New("Server is dead")
+	if server.dead {
+		return errors.New("server is dead")
 	}
 	if server.database == nil {
-		return errors.New("Database not initialized")
+		return errors.New("database not initialized")
 	}
 
 	if r, ok := server.PutOps[args.Args.OpId]; ok {
@@ -77,6 +79,10 @@ func (server *KVServer) ForwardPut(args *ForwardPutArgs, reply *PutReply) error 
 
 // RPC for the primary to send the full database to a new backup
 func (server *KVServer) ForwardDB(args *ForwardDBArgs, reply *ForwardDBReply) error {
+
+	server.mu.Lock()
+	defer server.mu.Unlock()
+
 	if server.dead {
 		return errors.New("server is dead")
 	}
@@ -103,16 +109,19 @@ func (server *KVServer) ForwardDB(args *ForwardDBArgs, reply *ForwardDBReply) er
 	return nil
 }
 
-func (server *KVServer) Put(args *PutArgs, reply *PutReply, op_id int) error {
+func (server *KVServer) Put(args *PutArgs, reply *PutReply) error {
 	// Your code here.
-	if server.isprimary == false {
-		return errors.New("Not primary")
+	server.mu.Lock()
+	defer server.mu.Unlock()
+
+	if !server.isprimary {
+		return errors.New("not primary")
 	}
-	if server.dead == true {
-		return errors.New("Server is dead")
+	if server.dead {
+		return errors.New("server is dead")
 	}
 	if server.database == nil {
-		return errors.New("Database not initialized")
+		return errors.New("database not initialized")
 	}
 
 	if r, ok := server.PutOps[args.OpId]; ok {
@@ -164,14 +173,17 @@ func (server *KVServer) Put(args *PutArgs, reply *PutReply, op_id int) error {
 
 func (server *KVServer) Get(args *GetArgs, reply *GetReply) error {
 	// Your code here.
-	if server.isprimary == false {
-		return errors.New("Not primary")
+	server.mu.Lock()
+	defer server.mu.Unlock()
+
+	if !server.isprimary {
+		return errors.New("not primary")
 	}
-	if server.dead == true {
-		return errors.New("Server is dead")
+	if server.dead {
+		return errors.New("server is dead")
 	}
 	if server.database == nil {
-		return errors.New("Database not initialized")
+		return errors.New("database not initialized")
 	}
 
 	if r, ok := server.GetOps[args.OpId]; ok {

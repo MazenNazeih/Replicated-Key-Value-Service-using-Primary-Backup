@@ -3,8 +3,9 @@ package kvservice
 import (
 	"fmt"
 	"net/rpc"
-	"strconv"
 	"replicatedkv/sysmonitor"
+	"strconv"
+	"sync"
 
 	"time"
 )
@@ -21,6 +22,7 @@ type KVClient struct {
 	view sysmonitor.View
 	id   string // should be generated to be a random string
 	opid int64  // sequence number to generate unique OpId
+	mu   sync.Mutex
 }
 
 func MakeKVClient(monitorServer string) *KVClient {
@@ -81,6 +83,9 @@ func (client *KVClient) updateView() {
 func (client *KVClient) Get(key string) string {
 
 	// Your code here.
+	client.mu.Lock()
+	defer client.mu.Unlock()
+
 	client.updateView()
 	for {
 		if client.view.Primary == "" {
@@ -108,6 +113,7 @@ func (client *KVClient) Get(key string) string {
 // You can get the primary from the client's current view.
 func (client *KVClient) PutAux(key string, value string, dohash bool) string {
 	// Your code here.
+
 	client.updateView()
 	for {
 		if client.view.Primary == "" {
@@ -136,10 +142,16 @@ func (client *KVClient) PutAux(key string, value string, dohash bool) string {
 
 // Both put and puthash rely on the auxiliary method PutAux. No modifications needed below.
 func (client *KVClient) Put(key string, value string) {
+	client.mu.Lock()
+	defer client.mu.Unlock()
+
 	client.PutAux(key, value, false)
 }
 
 func (client *KVClient) PutHash(key string, value string) string {
+	client.mu.Lock()
+	defer client.mu.Unlock()
+
 	v := client.PutAux(key, value, true)
 	return v
 }
