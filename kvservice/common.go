@@ -19,7 +19,7 @@ type PutArgs struct {
 	Value  string
 	DoHash bool // For PutHash
 	// Add your definitions here.
-
+	OpId string // OpId is a unique identifier for the operation
 	// Field names should start with capital letters for RPC to work.
 }
 
@@ -31,6 +31,7 @@ type PutReply struct {
 type GetArgs struct {
 	Key string
 	// Add your definitions here.
+	OpId string // OpId is a unique identifier for the operation
 }
 
 type GetReply struct {
@@ -43,12 +44,13 @@ type GetReply struct {
 
 type ForwardDBArgs struct {
 	Database map[string]string
+	PutOps     map[string]PutReply
+	GetOps    map[string]GetReply
 }
 type ForwardDBReply struct{}
 
 type ForwardPutArgs struct {
 	Args     *PutArgs
-	OpId     int
 	OldValue string
 }
 

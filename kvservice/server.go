@@ -39,7 +39,8 @@ type KVServer struct {
 	database    map[string]string
 	// lastAppliedSequenceNumber int
 	// currentSequenceNumber int
-	operations map[int]string // maps opid with old value
+	PutOps map[string]PutReply
+	GetOps map[string]GetReply
 
 	// Add your declarations here.
 }
@@ -53,11 +54,23 @@ func (server *KVServer) ForwardPut(args *ForwardPutArgs, reply *PutReply) error 
 	if server.database == nil {
 		return errors.New("Database not initialized")
 	}
+
+	if r, ok := server.PutOps[args.Args.OpId]; ok {
+		reply.PreviousValue = r.PreviousValue
+		reply.Err = OK
+		return nil
+	}
+
 	if args.Args.DoHash {
 		reply.PreviousValue = args.OldValue
+
 	}
 
 	server.database[args.Args.Key] = args.Args.Value
+	server.PutOps[args.Args.OpId] = PutReply{
+		Err:           OK,
+		PreviousValue: args.OldValue,
+	}
 
 	return nil
 }
@@ -70,10 +83,23 @@ func (server *KVServer) ForwardDB(args *ForwardDBArgs, reply *ForwardDBReply) er
 	if server.database == nil {
 		server.database = make(map[string]string)
 	}
+	if server.PutOps == nil {
+		server.PutOps = make(map[string]PutReply)
+	}
+	if server.GetOps == nil {
+		server.GetOps = make(map[string]GetReply)
+	}
 	// Replace the backup's database with the full copy
 	for k, v := range args.Database {
 		server.database[k] = v
 	}
+	for k, v := range args.PutOps {
+		server.PutOps[k] = v
+	}
+	for k, v := range args.GetOps {
+		server.GetOps[k] = v
+	}
+
 	return nil
 }
 
@@ -89,6 +115,12 @@ func (server *KVServer) Put(args *PutArgs, reply *PutReply, op_id int) error {
 		return errors.New("Database not initialized")
 	}
 
+	if r, ok := server.PutOps[args.OpId]; ok {
+		reply.PreviousValue = r.PreviousValue
+		reply.Err = OK
+		return nil
+	}
+
 	previous_value := server.database[args.Key]        // eturns "" if not found
 	new_value_int := hash(previous_value + args.Value) // returns the new value as uint32
 	new_value_str := strconv.Itoa(int(new_value_int))
@@ -98,15 +130,16 @@ func (server *KVServer) Put(args *PutArgs, reply *PutReply, op_id int) error {
 		if err == nil {
 			defer backupClnt.Close()
 			var backupReply PutReply
-			backupArgs := ForwardPutArgs{
+			backupArgs := &ForwardPutArgs{
 				Args:     args,
-				OpId:     op_id,
 				OldValue: previous_value,
 			}
 			err = backupClnt.Call("KVServer.ForwardPut", backupArgs, &backupReply)
 			if err != nil {
 				return err
 			}
+		} else {
+			return err
 		}
 	}
 	// if no error during forwarding then update the database
@@ -114,8 +147,16 @@ func (server *KVServer) Put(args *PutArgs, reply *PutReply, op_id int) error {
 
 		server.database[args.Key] = new_value_str
 		reply.PreviousValue = previous_value
+		server.PutOps[args.OpId] = PutReply{
+			Err:           OK,
+			PreviousValue: previous_value,
+		}
 	} else {
 		server.database[args.Key] = args.Value
+		server.PutOps[args.OpId] = PutReply{
+			Err:           OK,
+			PreviousValue: previous_value,
+		}
 	}
 
 	return nil
@@ -123,7 +164,34 @@ func (server *KVServer) Put(args *PutArgs, reply *PutReply, op_id int) error {
 
 func (server *KVServer) Get(args *GetArgs, reply *GetReply) error {
 	// Your code here.
+	if server.isprimary == false {
+		return errors.New("Not primary")
+	}
+	if server.dead == true {
+		return errors.New("Server is dead")
+	}
+	if server.database == nil {
+		return errors.New("Database not initialized")
+	}
+
+	if r, ok := server.GetOps[args.OpId]; ok {
+		reply.Value = r.Value
+		reply.Err = OK
+		return nil
+	}
+
+	val, ok := server.database[args.Key]
+	if ok {
+		reply.Value = val
+		reply.Err = OK
+	} else {
+		reply.Value = ""
+		reply.Err = ErrNoKey
+	}
+
+	server.GetOps[args.OpId] = *reply
 	return nil
+
 }
 
 // ping the view server periodically.
@@ -161,7 +229,11 @@ func (server *KVServer) tick() {
 				continue
 			}
 			defer backupClnt.Close()
-			args := &ForwardDBArgs{Database: server.database}
+			args := &ForwardDBArgs{
+				Database: server.database,
+				PutOps:   server.PutOps,
+				GetOps:   server.GetOps,
+			}
 			var reply ForwardDBReply
 			err = backupClnt.Call("KVServer.ForwardDB", args, &reply)
 			if err != nil {
@@ -189,6 +261,8 @@ func StartKVServer(monitorServer string, id string) *KVServer {
 	server.database = make(map[string]string)
 	// Add your server initializations here
 	// ==================================
+	server.GetOps = make(map[string]GetReply)
+	server.PutOps = make(map[string]PutReply)
 
 	//====================================
 

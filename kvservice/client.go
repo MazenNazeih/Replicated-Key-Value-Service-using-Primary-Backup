@@ -3,7 +3,9 @@ package kvservice
 import (
 	"fmt"
 	"net/rpc"
+	"strconv"
 	"sysmonitor"
+	"time"
 )
 
 // import "time"
@@ -17,16 +19,18 @@ type KVClient struct {
 	// Use updateView() to update this view when doing get and put as needed.
 	view sysmonitor.View
 	id   string // should be generated to be a random string
+	opid int64  // sequence number to generate unique OpId
 }
 
 func MakeKVClient(monitorServer string) *KVClient {
 	client := new(KVClient)
 	client.monitorClnt = sysmonitor.MakeClient("", monitorServer)
 	client.view = sysmonitor.View{} // An empty view.
+	client.opid = 0
 
 	// ToDo: Generate a random id for the client.
 	// ==================================
-
+	client.id = strconv.FormatInt(nrand(), 10)
 	//====================================
 
 	return client
@@ -76,16 +80,57 @@ func (client *KVClient) updateView() {
 func (client *KVClient) Get(key string) string {
 
 	// Your code here.
-	return "??"
+	client.updateView()
+	for {
+		if client.view.Primary == "" {
+			client.updateView()
+			continue
+		}
+		args := &GetArgs{
+			Key:  key,
+			OpId: client.id + ":" + strconv.FormatInt(client.opid, 10),
+		}
+		reply := GetReply{}
+		ok := call(client.view.Primary, "KVServer.Get", args, &reply)
+		if ok {
+			client.opid++
+			return reply.Value
+		}
+		client.updateView()
+		time.Sleep(sysmonitor.PingInterval)
+
+	}
 }
 
 // This should tell the primary to update key's value through an RPC call.
 // must keep trying until it succeeds.
 // You can get the primary from the client's current view.
 func (client *KVClient) PutAux(key string, value string, dohash bool) string {
-
 	// Your code here.
-	return "??"
+	client.updateView()
+	for {
+		if client.view.Primary == "" {
+			client.updateView()
+			continue
+		}
+		args := &PutArgs{
+			Key:    key,
+			Value:  value,
+			DoHash: dohash,
+			OpId:   client.id + ":" + strconv.FormatInt(client.opid, 10),
+		}
+		reply := PutReply{}
+		ok := call(client.view.Primary, "KVServer.Put", args, &reply)
+		if ok {
+			client.opid++
+			if dohash {
+				return reply.PreviousValue
+			}
+			return "dummy"
+		}
+		client.updateView()
+		time.Sleep(sysmonitor.PingInterval)
+	}
 }
 
 // Both put and puthash rely on the auxiliary method PutAux. No modifications needed below.
