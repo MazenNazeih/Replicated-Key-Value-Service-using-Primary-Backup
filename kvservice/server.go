@@ -69,7 +69,6 @@ func (server *KVServer) ForwardPut(args *ForwardPutArgs, reply *PutReply) error 
 		reply.PreviousValue = args.OldValue
 
 	}
-
 	server.database[args.Args.Key] = args.Args.Value
 	server.PutOps[args.Args.OpId] = PutReply{
 		Err:           OK,
@@ -137,22 +136,21 @@ func (server *KVServer) Put(args *PutArgs, reply *PutReply) error {
 	new_value_str := strconv.Itoa(int(new_value_int))
 	// Forward to backup if there is one
 	if server.view.Backup != "" {
-		backupClnt, err := rpc.Dial("unix", server.view.Backup)
-		if err == nil {
-			defer backupClnt.Close()
 			var backupReply PutReply
 			backupArgs := &ForwardPutArgs{
 				Args:     args,
 				OldValue: previous_value,
 			}
-			err = backupClnt.Call("KVServer.ForwardPut", backupArgs, &backupReply)
-			if err != nil {
-				return err
+			if args.DoHash {
+				backupArgs.Args.Value = new_value_str
 			}
-		} else {
-			return err
-		}
-	}
+			ok := call(server.view.Backup, "KVServer.ForwardPut", backupArgs, &backupReply)
+			
+			if !ok{
+				return errors.New("failed to forward to backup")
+			}
+		} 
+	
 	// if no error during forwarding then update the database
 	if args.DoHash {
 
@@ -210,7 +208,8 @@ func (server *KVServer) Get(args *GetArgs, reply *GetReply) error {
 
 // ping the view server periodically.
 func (server *KVServer) tick() {
-
+server.mu.Lock()
+	defer server.mu.Unlock()
 	// This line will give an error initially as view and err are not used.
 	view, err := server.monitorClnt.Ping(server.view.Viewnum)
 
@@ -220,8 +219,7 @@ func (server *KVServer) tick() {
 		view, err = server.monitorClnt.Ping(server.view.Viewnum)
 	}
 
-	server.mu.Lock()
-	defer server.mu.Unlock()
+	
 
 	if view.Primary == server.id {
 		server.isprimary = true

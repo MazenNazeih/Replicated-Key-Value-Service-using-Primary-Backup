@@ -1,7 +1,7 @@
 package kvservice
 
 import (
-	"fmt"
+	// "fmt"
 	"net/rpc"
 	"replicatedkv/sysmonitor"
 	"strconv"
@@ -66,7 +66,7 @@ func call(srv string, rpcname string,
 		return true
 	}
 
-	fmt.Println(err)
+	// fmt.Println(err)
 	return false
 }
 
@@ -82,12 +82,12 @@ func (client *KVClient) updateView() {
 // This must keep trying until it gets a response.
 func (client *KVClient) Get(key string) string {
 
-	// Your code here.
-	client.mu.Lock()
-	defer client.mu.Unlock()
+	// // Your code here.
+	// client.mu.Lock()
+	// defer client.mu.Unlock()
 
-	client.updateView()
 	for {
+		client.updateView()
 		if client.view.Primary == "" {
 			client.updateView()
 			continue
@@ -102,7 +102,7 @@ func (client *KVClient) Get(key string) string {
 			client.opid++
 			return reply.Value
 		}
-		client.updateView()
+
 		time.Sleep(sysmonitor.PingInterval)
 
 	}
