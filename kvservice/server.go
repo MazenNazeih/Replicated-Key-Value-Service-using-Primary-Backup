@@ -50,6 +50,8 @@ func (server *KVServer) ForwardPut(args *ForwardPutArgs, reply *PutReply) error 
 	server.mu.Lock()
 	defer server.mu.Unlock()
 
+	// fmt.Printf("forwarding value  %s\n", args.Args.Value)
+
 	if server.dead {
 		return errors.New("server is dead")
 	}
@@ -211,51 +213,55 @@ func (server *KVServer) tick() {
 
 	// This line will give an error initially as view and err are not used.
 	view, err := server.monitorClnt.Ping(server.view.Viewnum)
-	if err != nil {
-		server.Kill()
+
+	// Your code here.
+	// loop until we get a valid view
+	for err != nil {
+		view, err = server.monitorClnt.Ping(server.view.Viewnum)
 	}
+
+	server.mu.Lock()
+	defer server.mu.Unlock()
 
 	if view.Primary == server.id {
 		server.isprimary = true
+		server.isbackup = false
 	} else if view.Backup == server.id {
 		server.isbackup = true
+		server.isprimary = false
 	} else {
 		server.isprimary = false
 		server.isbackup = false
 	}
 
-	// detect if primary and there is a new backup
-	if server.isprimary && view.Backup != server.view.Backup {
-
-		// Forward the full db to the new backup
-		backupClnt, err := rpc.Dial("unix", view.Backup)
-		for err != nil {
-			view, err := server.monitorClnt.Ping(server.view.Viewnum)
+	// check if primary has new backup
+	if server.isprimary && view.Backup != server.view.Backup && view.Backup != "" {
+		args := &ForwardDBArgs{
+			Database: server.database,
+			PutOps:   server.PutOps,
+			GetOps:   server.GetOps,
+		}
+		var reply ForwardDBReply
+		ok := call(view.Backup, "KVServer.ForwardDB", args, &reply)
+		for !ok {
+			// check tte view again
+			view, err = server.monitorClnt.Ping(server.view.Viewnum)
 			if err != nil {
-				server.Kill()
+				continue
+			}
+			if view.Backup != "" {
+				ok = call(view.Backup, "KVServer.ForwardDB", args, &reply)
+			} else {
 				break
 			}
-			server.view = view
-			backupClnt, err = rpc.Dial("unix", server.view.Backup)
-			if err != nil {
-				continue
-			}
-			defer backupClnt.Close()
-			args := &ForwardDBArgs{
-				Database: server.database,
-				PutOps:   server.PutOps,
-				GetOps:   server.GetOps,
-			}
-			var reply ForwardDBReply
-			err = backupClnt.Call("KVServer.ForwardDB", args, &reply)
-			if err != nil {
-				continue
-			}
+
 		}
 
 	}
 
+	server.view = view
 }
+
 
 // tell the server to shut itself down.
 // please do not change this function.

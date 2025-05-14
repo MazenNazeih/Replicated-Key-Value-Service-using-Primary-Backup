@@ -2,10 +2,10 @@ package main
 
 import (
 	"fmt"
-	"kvservice"
 	"os"
+	"replicatedkv/kvservice"
+	"replicatedkv/sysmonitor"
 	"strconv"
-	"sysmonitor"
 	"time"
 )
 
