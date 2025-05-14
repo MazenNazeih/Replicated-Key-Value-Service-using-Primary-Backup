@@ -41,6 +41,17 @@ type GetReply struct {
 // Add your RPC definitions here.
 //======================================
 
+type ForwardDBArgs struct {
+	Database map[string]string
+}
+type ForwardDBReply struct{}
+
+type ForwardPutArgs struct {
+	Args     *PutArgs
+	OpId     int
+	OldValue string
+}
+
 // ======================================
 
 func hash(s string) uint32 {

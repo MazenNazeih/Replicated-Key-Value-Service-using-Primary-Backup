@@ -1,12 +1,14 @@
 package kvservice
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"math/rand"
 	"net"
 	"net/rpc"
 	"os"
+	"strconv"
 	"sync"
 	"syscall"
 	"sysmonitor"
@@ -32,12 +34,90 @@ type KVServer struct {
 	view        sysmonitor.View
 	done        sync.WaitGroup
 	finish      chan interface{}
+	isprimary   bool
+	isbackup    bool
+	database    map[string]string
+	// lastAppliedSequenceNumber int
+	// currentSequenceNumber int
+	operations map[int]string // maps opid with old value
 
 	// Add your declarations here.
 }
 
-func (server *KVServer) Put(args *PutArgs, reply *PutReply) error {
+// RPC for the primary to forward a Put/PutHash to the backup
+func (server *KVServer) ForwardPut(args *ForwardPutArgs, reply *PutReply) error {
+
+	if server.dead == true {
+		return errors.New("Server is dead")
+	}
+	if server.database == nil {
+		return errors.New("Database not initialized")
+	}
+	if args.Args.DoHash {
+		reply.PreviousValue = args.OldValue
+	}
+
+	server.database[args.Args.Key] = args.Args.Value
+
+	return nil
+}
+
+// RPC for the primary to send the full database to a new backup
+func (server *KVServer) ForwardDB(args *ForwardDBArgs, reply *ForwardDBReply) error {
+	if server.dead {
+		return errors.New("server is dead")
+	}
+	if server.database == nil {
+		server.database = make(map[string]string)
+	}
+	// Replace the backup's database with the full copy
+	for k, v := range args.Database {
+		server.database[k] = v
+	}
+	return nil
+}
+
+func (server *KVServer) Put(args *PutArgs, reply *PutReply, op_id int) error {
 	// Your code here.
+	if server.isprimary == false {
+		return errors.New("Not primary")
+	}
+	if server.dead == true {
+		return errors.New("Server is dead")
+	}
+	if server.database == nil {
+		return errors.New("Database not initialized")
+	}
+
+	previous_value := server.database[args.Key]        // eturns "" if not found
+	new_value_int := hash(previous_value + args.Value) // returns the new value as uint32
+	new_value_str := strconv.Itoa(int(new_value_int))
+	// Forward to backup if there is one
+	if server.view.Backup != "" {
+		backupClnt, err := rpc.Dial("unix", server.view.Backup)
+		if err == nil {
+			defer backupClnt.Close()
+			var backupReply PutReply
+			backupArgs := ForwardPutArgs{
+				Args:     args,
+				OpId:     op_id,
+				OldValue: previous_value,
+			}
+			err = backupClnt.Call("KVServer.ForwardPut", backupArgs, &backupReply)
+			if err != nil {
+				return err
+			}
+		}
+	}
+	// if no error during forwarding then update the database
+	if args.DoHash {
+
+		server.database[args.Key] = new_value_str
+		reply.PreviousValue = previous_value
+	} else {
+		server.database[args.Key] = args.Value
+	}
+
 	return nil
 }
 
@@ -51,8 +131,45 @@ func (server *KVServer) tick() {
 
 	// This line will give an error initially as view and err are not used.
 	view, err := server.monitorClnt.Ping(server.view.Viewnum)
+	if err != nil {
+		server.Kill()
+	}
 
-	// Your code here.
+	if view.Primary == server.id {
+		server.isprimary = true
+	} else if view.Backup == server.id {
+		server.isbackup = true
+	} else {
+		server.isprimary = false
+		server.isbackup = false
+	}
+
+	// detect if primary and there is a new backup
+	if server.isprimary && view.Backup != server.view.Backup {
+
+		// Forward the full db to the new backup
+		backupClnt, err := rpc.Dial("unix", view.Backup)
+		for err != nil {
+			view, err := server.monitorClnt.Ping(server.view.Viewnum)
+			if err != nil {
+				server.Kill()
+				break
+			}
+			server.view = view
+			backupClnt, err = rpc.Dial("unix", server.view.Backup)
+			if err != nil {
+				continue
+			}
+			defer backupClnt.Close()
+			args := &ForwardDBArgs{Database: server.database}
+			var reply ForwardDBReply
+			err = backupClnt.Call("KVServer.ForwardDB", args, &reply)
+			if err != nil {
+				continue
+			}
+		}
+
+	}
 
 }
 
@@ -69,7 +186,7 @@ func StartKVServer(monitorServer string, id string) *KVServer {
 	server.monitorClnt = sysmonitor.MakeClient(id, monitorServer)
 	server.view = sysmonitor.View{}
 	server.finish = make(chan interface{})
-
+	server.database = make(map[string]string)
 	// Add your server initializations here
 	// ==================================
 
